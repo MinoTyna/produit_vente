@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Achat
+from .models import Facture
 
 class AchatReadSerializer(serializers.ModelSerializer):
     client = serializers.CharField(source='ClientID.Client_nom', read_only=True)
@@ -47,3 +48,8 @@ class AchatWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Achat
         fields = ['ClientID', 'ResponsableID', 'ProduitID', 'Achat_quantite']
+
+class FactureCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Facture
+        fields = ['achat'] 

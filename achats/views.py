@@ -91,6 +91,85 @@ from django.db.models import Prefetch
 #             "montant_total_session": montant_total_global
 #         }, status=status.HTTP_201_CREATED)
 
+# class EnregistrerAchatAPIView(APIView):
+#     def post(self, request):
+#         data = request.data
+#         client_id = data.get('ClientID')
+#         responsable_id = data.get('ResponsableID')
+#         achats_data = data.get('achats', [])
+
+#         if not achats_data:
+#             return Response({"error": "Aucun achat fourni"}, status=status.HTTP_400_BAD_REQUEST)
+
+#         achats_enregistres = []
+#         montant_total_global = Decimal('0.00')
+
+#         for achat in achats_data:
+#             produit_id = achat.get('ProduitID')
+#             quantite_achat = achat.get('Achat_quantite')
+
+#             if not produit_id or not quantite_achat:
+#                 return Response({"error": "Produit et quantité requis pour chaque achat"}, status=status.HTTP_400_BAD_REQUEST)
+
+#             try:
+#                 produit = Produit.objects.get(id=produit_id)
+#             except Produit.DoesNotExist:
+#                 return Response({"error": f"Produit avec id {produit_id} introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+#             if produit.Produit_quantite < quantite_achat:
+#                 return Response({
+#                     "error": f"Stock insuffisant pour '{produit.Produit_nom}'. Disponible: {produit.Produit_quantite}, demandé: {quantite_achat}"
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+
+#             montant_achat = Decimal(produit.Produit_prix) * Decimal(quantite_achat)
+#             montant_total_global += montant_achat
+
+#             achat_data = {
+#                 "ClientID": client_id,
+#                 "ResponsableID": responsable_id,
+#                 "ProduitID": produit_id,
+#                 "Achat_quantite": quantite_achat,
+#                 "Achat_montant": montant_achat,
+#             }
+
+#             serializer = AchatWriteSerializer(data=achat_data)
+#             if serializer.is_valid():
+#                 achat_instance = serializer.save()
+#                 achats_enregistres.append(achat_instance)
+
+#                 produit.Produit_quantite -= quantite_achat
+#                 produit.save()
+
+#                 # Envoi d'email si stock bas
+#                 if produit.Produit_quantite < 3:
+#                     responsable = achat_instance.responsable
+#                     send_mail(
+#                         subject=f"Stock bas pour {produit.Produit_nom}",
+#                         message=f"Le stock du produit '{produit.Produit_nom}' est faible ({produit.Produit_quantite} restants).",
+#                         from_email=settings.EMAIL_HOST_USER,
+#                         recipient_list=[responsable.Responsable_email],
+#                         fail_silently=False,
+#                     )
+#             else:
+#                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#         # ✅ Sérialiser seulement les achats de cette session
+#         achats_serializer = AchatReadSerializer(achats_enregistres, many=True)
+
+#         return Response({
+#             "achats": achats_serializer.data,
+#             "montant_total_session": montant_total_global
+#         }, status=status.HTTP_201_CREATED)
+
+# from decimal import Decimal
+# from rest_framework.views import APIView
+# from rest_framework.response import Response
+# from rest_framework import status
+# from django.core.mail import send_mail
+# from django.conf import settings
+# from .models import Produit
+# from .serializers import AchatWriteSerializer, AchatReadSerializer
+
 class EnregistrerAchatAPIView(APIView):
     def post(self, request):
         data = request.data
@@ -104,6 +183,9 @@ class EnregistrerAchatAPIView(APIView):
         achats_enregistres = []
         montant_total_global = Decimal('0.00')
 
+        # 👉 Stock temporaire pour suivre la quantité réservée pendant la session
+        stock_temp = {}
+
         for achat in achats_data:
             produit_id = achat.get('ProduitID')
             quantite_achat = achat.get('Achat_quantite')
@@ -116,9 +198,12 @@ class EnregistrerAchatAPIView(APIView):
             except Produit.DoesNotExist:
                 return Response({"error": f"Produit avec id {produit_id} introuvable"}, status=status.HTTP_404_NOT_FOUND)
 
-            if produit.Produit_quantite < quantite_achat:
+            deja_reserve = stock_temp.get(produit_id, 0)
+            stock_restant = produit.Produit_quantite - deja_reserve
+
+            if stock_restant < quantite_achat:
                 return Response({
-                    "error": f"Stock insuffisant pour '{produit.Produit_nom}'. Disponible: {produit.Produit_quantite}, demandé: {quantite_achat}"
+                    "error": f"Stock insuffisant pour '{produit.Produit_nom}'. Disponible: {stock_restant}, demandé: {quantite_achat}"
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             montant_achat = Decimal(produit.Produit_prix) * Decimal(quantite_achat)
@@ -137,29 +222,36 @@ class EnregistrerAchatAPIView(APIView):
                 achat_instance = serializer.save()
                 achats_enregistres.append(achat_instance)
 
-                produit.Produit_quantite -= quantite_achat
-                produit.save()
-
-                # Envoi d'email si stock bas
-                if produit.Produit_quantite < 3:
-                    responsable = achat_instance.responsable
-                    send_mail(
-                        subject=f"Stock bas pour {produit.Produit_nom}",
-                        message=f"Le stock du produit '{produit.Produit_nom}' est faible ({produit.Produit_quantite} restants).",
-                        from_email=settings.EMAIL_HOST_USER,
-                        recipient_list=[responsable.Responsable_email],
-                        fail_silently=False,
-                    )
+                # 👉 Enregistre la quantité réservée temporairement
+                stock_temp[produit_id] = deja_reserve + quantite_achat
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # ✅ Sérialiser seulement les achats de cette session
+        # 👉 Mise à jour réelle du stock après toutes les vérifications
+        for produit_id, quantite_total in stock_temp.items():
+            produit = Produit.objects.get(id=produit_id)
+            produit.Produit_quantite -= quantite_total
+            produit.save()
+
+            if produit.Produit_quantite < 3:
+                responsable = achats_enregistres[0].ResponsableID
+  # Un seul responsable pour la session
+                send_mail(
+                    subject=f"Stock bas pour {produit.Produit_nom}",
+                    message=f"Le stock du produit '{produit.Produit_nom}' est faible ({produit.Produit_quantite} restants).",
+                    from_email=settings.EMAIL_HOST_USER,
+                    recipient_list=[responsable.Responsable_email],
+                    fail_silently=False,
+                )
+
+        # ✅ Retourne seulement les achats de cette session
         achats_serializer = AchatReadSerializer(achats_enregistres, many=True)
 
         return Response({
             "achats": achats_serializer.data,
             "montant_total_session": montant_total_global
         }, status=status.HTTP_201_CREATED)
+
 
 class ListAchatAPIView(APIView):
     def get(self, request, client_id):

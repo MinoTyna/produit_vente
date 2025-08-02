@@ -9,12 +9,15 @@ from dateutil.relativedelta import relativedelta
 from responsable.models import Responsable
 from .serializers import PaiementSerializer
 from django.core.mail import EmailMessage
-from datetime import date, timedelta
 from .models import Paiement
 from client.models import Client
 from datetime import datetime, date, timedelta
 from achats.models import Facture
 from django.db.models import Max
+from django.utils.timezone import now
+from collections import defaultdict
+
+
 
 def envoyer_sms(numero, message):
     # Simule l’envoi de SMS
@@ -35,719 +38,6 @@ def envoyer_email(sujet, message, destinataires, reply_to=None):
     email.send(fail_silently=False)
 
 
-# class PaiementCreateView(generics.CreateAPIView):
-#     queryset = Paiement.objects.all()
-#     serializer_class = PaiementSerializer
-
-#     def create(self, request, *args, **kwargs):
-#         client_id = request.data.get('client')
-#         if not client_id:
-#             return Response({"error": "Le champ 'client' est requis."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             montant_paye = Decimal(request.data.get('Paiement_montant', '0'))
-#         except:
-#             return Response({"error": "Le montant payé est invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         if montant_paye < Decimal('100000'):
-#             return Response(
-#                 {"error": "Le montant minimum à payer est de 100 000 Ariary."},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         type_paiement = request.data.get('Paiement_type', '').lower()
-#         if type_paiement not in ['comptant', 'mensuel']:
-#             return Response({"error": "Type de paiement invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Vérifications spécifiques au paiement mensuel
-#         if type_paiement == 'mensuel':
-#             if not request.data.get('Paiement_montantchoisi'):
-#                 return Response({"error": "Le champ 'Paiement_montantchoisi' est requis pour un paiement mensuel."},
-#                                 status=status.HTTP_400_BAD_REQUEST)
-
-#             if not request.data.get('Paiement_datechoisi'):
-#                 return Response({"error": "La date de paiement choisie est requise pour un paiement mensuel."},
-#                                 status=status.HTTP_400_BAD_REQUEST)
-
-#         achats_client = Achat.objects.filter(ClientID_id=client_id)
-#         if not achats_client.exists():
-#             return Response({"error": "Aucun achat trouvé pour ce client."}, status=status.HTTP_404_NOT_FOUND)
-
-#         total_attendu = sum(achat.ProduitID.Produit_prix * achat.Achat_quantite for achat in achats_client)
-#         total_deja_paye = Paiement.objects.filter(AchatsID__ClientID_id=client_id).aggregate(
-#             total=Sum('Paiement_montant')
-#         )['total'] or Decimal('0')
-
-#         nouveau_total = total_deja_paye + montant_paye
-#         reste = max(total_attendu - nouveau_total, Decimal('0'))
-#         statut = "complet" if nouveau_total >= total_attendu else "incomplet"
-
-#         montant_rendu = 0
-#         if nouveau_total > total_attendu:
-#             montant_rendu = int(nouveau_total - total_attendu)
-
-#         dernier_achat = achats_client.order_by('-Achat_date').first()
-
-#         # Préparation des données
-#         data = request.data.copy()
-#         data['AchatsID'] = dernier_achat.id
-#         data['Paiement_montant'] = montant_paye
-
-#         if type_paiement == 'mensuel':
-#             data['Paiement_montantchoisi'] = request.data.get('Paiement_montantchoisi')
-#             data['Paiement_datechoisi'] = request.data.get('Paiement_datechoisi')
-#         else:
-#             data.pop('Paiement_montantchoisi', None)
-#             data.pop('Paiement_datechoisi', None)
-
-#         serializer = self.get_serializer(data=data)
-#         serializer.is_valid(raise_exception=True)
-#         paiement = serializer.save()
-
-#         # Envoi de SMS
-#         client = dernier_achat.ClientID
-#         numero = client.Client_telephone
-#         message_sms = (
-#             f"Bonjour {client.Client_nom}, votre paiement de {montant_paye:.0f} Ar a été reçu. "
-#             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar."
-#         )
-#         envoyer_sms(numero, message_sms)
-
-#         # Envoi d'e-mail aux responsables
-#         responsable = dernier_achat.ResponsableID
-#         vendeur_email = responsable.Responsable_email
-#         admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
-
-#         envoyer_email(
-#             sujet=f"Confirmation de paiement - {client.Client_nom}",
-#             message=(
-#                 f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
-#                 f"Statut : {statut}\n"
-#                 f"Reste à payer : {reste:.0f} Ar.\n"
-#             ),
-#             destinataires=list(admins) + [vendeur_email],
-#             reply_to=vendeur_email
-#         )
-
-#         # Construction de la réponse
-#         produits_achetes = [
-#             {
-#                 "nom": achat.ProduitID.Produit_nom,
-#                 "quantite": achat.Achat_quantite,
-#                 "prix_unitaire": int(achat.ProduitID.Produit_prix),
-#                 "total": int(achat.ProduitID.Produit_prix * achat.Achat_quantite)
-#             }
-#             for achat in achats_client
-#         ]
-
-#         prixtotalproduit = sum(p["total"] for p in produits_achetes)
-
-#         data_response = {
-#             "produits": produits_achetes,
-#             "prixtotalproduit": prixtotalproduit,
-#             "statut": statut,
-#             "reste_a_payer": int(reste),
-#             "total_paye": int(nouveau_total),
-#             "montant_rendu": montant_rendu,
-#             "client": client.Client_nom,
-#             "date_paiement_prochaine": str(paiement.Paiement_datechoisi) if paiement.Paiement_datechoisi else None,
-#         }
-
-#         headers = self.get_success_headers(serializer.data)
-#         return Response(data_response, status=status.HTTP_201_CREATED, headers=headers)   
-
-# class PaiementCreateView(generics.CreateAPIView):
-#     queryset = Paiement.objects.all()
-#     serializer_class = PaiementSerializer
-
-#     def create(self, request, *args, **kwargs):
-#         client_id = request.data.get('client')
-#         if not client_id:
-#             return Response({"error": "Le champ 'client' est requis."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             montant_paye = Decimal(request.data.get('Paiement_montant', '0'))
-#         except:
-#             return Response({"error": "Le montant payé est invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         if montant_paye < Decimal('100000'):
-#             return Response(
-#                 {"error": "Le montant minimum à payer est de 100 000 Ariary."},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         # Récupération des paiements antérieurs pour ce client
-#         achats_client = Achat.objects.filter(ClientID_id=client_id)
-#         if not achats_client.exists():
-#             return Response({"error": "Aucun achat trouvé pour ce client."}, status=status.HTTP_404_NOT_FOUND)
-
-#         total_attendu = sum(achat.ProduitID.Produit_prix * achat.Achat_quantite for achat in achats_client)
-#         total_deja_paye = Paiement.objects.filter(AchatsID__ClientID_id=client_id).aggregate(
-#             total=Sum('Paiement_montant')
-#         )['total'] or Decimal('0')
-
-#         nouveau_total = total_deja_paye + montant_paye
-#         reste = max(total_attendu - nouveau_total, Decimal('0'))
-#         statut = "complet" if nouveau_total >= total_attendu else "incomplet"
-
-#         montant_rendu = 0
-#         if nouveau_total > total_attendu:
-#             montant_rendu = int(nouveau_total - total_attendu)
-
-#         dernier_achat = achats_client.order_by('-Achat_date').first()
-
-#         # Récupérer le dernier paiement mensuel pour ce client
-#         dernier_paiement_mensuel = Paiement.objects.filter(
-#             AchatsID__ClientID_id=client_id,
-#             Paiement_type='mensuel'
-#         ).order_by('-Paiement_datechoisi').first()
-
-#         # Lecture du type paiement envoyé (peut être vide si pas précisé dans JSON)
-#         type_paiement_recu = request.data.get('Paiement_type', '').lower()
-
-#         # Si on a un paiement mensuel (soit envoyé, soit connu via dernier paiement)
-#         is_mensuel = False
-#         montant_mensuel_choisi = None
-#         if type_paiement_recu == 'mensuel':
-#             is_mensuel = True
-#             # Montant mensuel choisi envoyé dans la requête
-#             montant_mensuel_choisi = Decimal(request.data.get('Paiement_montantchoisi'))
-#             # Vérif champs obligatoires pour mensuel
-#             if not montant_mensuel_choisi:
-#                 return Response({"error": "Le champ 'Paiement_montantchoisi' est requis pour un paiement mensuel."},
-#                                 status=status.HTTP_400_BAD_REQUEST)
-#             if not request.data.get('Paiement_datechoisi'):
-#                 return Response({"error": "La date de paiement choisie est requise pour un paiement mensuel."},
-#                                 status=status.HTTP_400_BAD_REQUEST)
-#             date_paiement_choisi = datetime.strptime(request.data.get('Paiement_datechoisi'), '%Y-%m-%d').date()
-#         else:
-#             # Pas envoyé, donc on regarde si un dernier paiement mensuel existe pour récupérer le montant
-#             if dernier_paiement_mensuel:
-#                 is_mensuel = True
-#                 montant_mensuel_choisi = dernier_paiement_mensuel.Paiement_montantchoisi
-#                 date_paiement_choisi = dernier_paiement_mensuel.Paiement_datechoisi
-#             else:
-#                 is_mensuel = False
-#                 montant_mensuel_choisi = None
-#                 date_paiement_choisi = None
-
-#         # Calcul date prochaine de paiement (uniquement pour mensuel)
-#         date_paiement_prochaine = None
-#         if is_mensuel and montant_mensuel_choisi and date_paiement_choisi:
-#             nb_mois_paye = int(montant_paye / montant_mensuel_choisi)
-#             date_paiement_prochaine = date_paiement_choisi + relativedelta(months=nb_mois_paye)
-
-#         # Préparer les données pour le serializer
-#         data = request.data.copy()
-#         data['AchatsID'] = dernier_achat.id
-#         data['Paiement_montant'] = montant_paye
-
-#         if is_mensuel:
-#             # Pour mensuel, on garde ou ajoute les champs nécessaires
-#             data['Paiement_type'] = 'mensuel'
-#             data['Paiement_montantchoisi'] = montant_mensuel_choisi
-#             data['Paiement_datechoisi'] = date_paiement_choisi
-#         else:
-#             # Sinon on supprime les champs optionnels
-#             data['Paiement_type'] = 'comptant'
-#             data.pop('Paiement_montantchoisi', None)
-#             data.pop('Paiement_datechoisi', None)
-
-#         serializer = self.get_serializer(data=data)
-#         serializer.is_valid(raise_exception=True)
-#         paiement = serializer.save()
-
-#         # Envoi SMS
-#         client = dernier_achat.ClientID
-#         numero = client.Client_telephone
-#         message_sms = (
-#             f"Bonjour {client.Client_nom}, votre paiement de {montant_paye:.0f} Ar a été reçu. "
-#             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar."
-#         )
-#         envoyer_sms(numero, message_sms)
-
-#         # Envoi email aux responsables
-#         responsable = dernier_achat.ResponsableID
-#         vendeur_email = responsable.Responsable_email
-#         admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
-
-#         envoyer_email(
-#             sujet=f"Confirmation de paiement - {client.Client_nom}",
-#             message=(
-#                 f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
-#                 f"Statut : {statut}\n"
-#                 f"Reste à payer : {reste:.0f} Ar.\n"
-#             ),
-#             destinataires=list(admins) + [vendeur_email],
-#             reply_to=vendeur_email
-#         )
-
-#         # Construction de la réponse
-#         produits_achetes = [
-#             {
-#                 "nom": achat.ProduitID.Produit_nom,
-#                 "quantite": achat.Achat_quantite,
-#                 "prix_unitaire": int(achat.ProduitID.Produit_prix),
-#                 "total": int(achat.ProduitID.Produit_prix * achat.Achat_quantite)
-#             }
-#             for achat in achats_client
-#         ]
-
-#         prixtotalproduit = sum(p["total"] for p in produits_achetes)
-
-#         data_response = {
-#             "produits": produits_achetes,
-#             "prixtotalproduit": prixtotalproduit,
-#             "statut": statut,
-#             "reste_a_payer": int(reste),
-#             "total_paye": int(nouveau_total),
-#             "montant_rendu": montant_rendu,
-#             "client": client.Client_nom,
-#             "date_paiement_prochaine": date_paiement_prochaine.strftime('%Y-%m-%d') if date_paiement_prochaine else None,
-#         }
-
-#         headers = self.get_success_headers(serializer.data)
-#         return Response(data_response, status=status.HTTP_201_CREATED, headers=headers)
-
-# class PaiementCreateView(generics.CreateAPIView):
-#     queryset = Paiement.objects.all()
-#     serializer_class = PaiementSerializer
-
-#     def create(self, request, *args, **kwargs):
-#         client_id = request.data.get('client')
-#         if not client_id:
-#             return Response({"error": "Le champ 'client' est requis."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             montant_paye = Decimal(request.data.get('Paiement_montant', '0'))
-#         except:
-#             return Response({"error": "Le montant payé est invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         if montant_paye < Decimal('100000'):
-#             return Response({"error": "Le montant minimum à payer est de 100 000 Ariary."},
-#                             status=status.HTTP_400_BAD_REQUEST)
-
-#         type_paiement = request.data.get('Paiement_type', '').lower()
-#         if type_paiement not in ['comptant', 'mensuel']:
-#             return Response({"error": "Type de paiement invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         montant_choisi = None
-#         date_choisie = None
-
-#         if type_paiement == 'mensuel':
-#             montant_choisi_str = request.data.get('Paiement_montantchoisi')
-#             if not montant_choisi_str:
-#                 # Récupérer le montant choisi du dernier paiement mensuel
-#                 dernier_paiement = Paiement.objects.filter(
-#                     AchatsID__ClientID_id=client_id,
-#                     Paiement_type='mensuel',
-#                     Paiement_montantchoisi__isnull=False
-#                 ).order_by('-Paiement_date').first()
-
-#                 if not dernier_paiement:
-#                     return Response({"error": "Le champ 'Paiement_montantchoisi' est requis pour un paiement mensuel."},
-#                                     status=status.HTTP_400_BAD_REQUEST)
-
-#                 montant_choisi = dernier_paiement.Paiement_montantchoisi
-#             else:
-#                 try:
-#                     montant_choisi = Decimal(montant_choisi_str)
-#                 except:
-#                     return Response({"error": "Le montant mensuel choisi est invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#             # Vérification et parsing de la date choisie
-#             date_choisie_str = request.data.get('Paiement_datechoisi')
-#             if not date_choisie_str:
-#                 return Response({"error": "La date de paiement choisie est requise pour un paiement mensuel."},
-#                                 status=status.HTTP_400_BAD_REQUEST)
-#             try:
-#                 date_choisie = datetime.strptime(date_choisie_str, "%Y-%m-%d").date()
-#             except:
-#                 return Response({"error": "Format de date invalide. Utilisez YYYY-MM-DD."},
-#                                 status=status.HTTP_400_BAD_REQUEST)
-
-#         achats_client = Achat.objects.filter(ClientID_id=client_id)
-#         if not achats_client.exists():
-#             return Response({"error": "Aucun achat trouvé pour ce client."}, status=status.HTTP_404_NOT_FOUND)
-
-#         total_attendu = sum(achat.ProduitID.Produit_prix * achat.Achat_quantite for achat in achats_client)
-#         total_deja_paye = Paiement.objects.filter(AchatsID__ClientID_id=client_id).aggregate(
-#             total=Sum('Paiement_montant')
-#         )['total'] or Decimal('0')
-
-#         nouveau_total = total_deja_paye + montant_paye
-#         reste = max(total_attendu - nouveau_total, Decimal('0'))
-#         statut = "complet" if nouveau_total >= total_attendu else "incomplet"
-#         montant_rendu = int(nouveau_total - total_attendu) if nouveau_total > total_attendu else 0
-
-#         dernier_achat = achats_client.order_by('-Achat_date').first()
-
-#         # Données à sauvegarder
-#         data = request.data.copy()
-#         data['AchatsID'] = dernier_achat.id
-#         data['Paiement_montant'] = montant_paye
-#         if type_paiement == 'mensuel':
-#             data['Paiement_montantchoisi'] = montant_choisi
-#             data['Paiement_datechoisi'] = date_choisie
-#         else:
-#             data.pop('Paiement_montantchoisi', None)
-#             data.pop('Paiement_datechoisi', None)
-
-#         serializer = self.get_serializer(data=data)
-#         serializer.is_valid(raise_exception=True)
-#         paiement = serializer.save()
-
-#         # Envoi de SMS
-#         client = dernier_achat.ClientID
-#         numero = client.Client_telephone
-#         message_sms = (
-#             f"Bonjour {client.Client_nom}, votre paiement de {montant_paye:.0f} Ar a été reçu. "
-#             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar."
-#         )
-#         envoyer_sms(numero, message_sms)
-
-#         # Envoi d'email
-#         responsable = dernier_achat.ResponsableID
-#         vendeur_email = responsable.Responsable_email
-#         admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
-#         envoyer_email(
-#             sujet=f"Confirmation de paiement - {client.Client_nom}",
-#             message=(
-#                 f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
-#                 f"Statut : {statut}\n"
-#                 f"Reste à payer : {reste:.0f} Ar.\n"
-#             ),
-#             destinataires=list(admins) + [vendeur_email],
-#             reply_to=vendeur_email
-#         )
-
-#         # Produits achetés
-#         produits_achetes = [
-#             {
-#                 "nom": achat.ProduitID.Produit_nom,
-#                 "quantite": achat.Achat_quantite,
-#                 "prix_unitaire": int(achat.ProduitID.Produit_prix),
-#                 "total": int(achat.ProduitID.Produit_prix * achat.Achat_quantite)
-#             }
-#             for achat in achats_client
-#         ]
-#         prixtotalproduit = sum(p["total"] for p in produits_achetes)
-
-#         # Repaiement : calcul des mois restants et de la prochaine échéance
-#         nombredemois_restant = None
-#         prochaine_date = None
-#         if type_paiement == 'mensuel' and montant_choisi > 0:
-#             nombredemois_restant = int(reste / montant_choisi)
-#             mois_a_ajouter = int(montant_paye / montant_choisi)
-
-#             if total_deja_paye == 0:
-#                 # Premier paiement → on garde la date choisie
-#                 prochaine_date = date_choisie
-#             else:
-#                 # Repaiement → on calcule la prochaine date
-#                 prochaine_date = date_choisie + relativedelta(months=mois_a_ajouter)
-
-#         # Construction de la réponse
-#         data_response = {
-#             "repaiement": True if type_paiement == 'mensuel' and statut == 'incomplet' else False,
-#             "client": client.Client_nom,
-#             "produits": produits_achetes,
-#             "prixtotalproduit": prixtotalproduit,
-#             "total_paye": int(nouveau_total),
-#             "reste_a_payer": int(reste),
-#             "montant_rendu": montant_rendu,
-#             "statut": statut,
-#             "Paiement_type": type_paiement,
-#             "Paiement_montantchoisi": int(montant_choisi) if montant_choisi else None,
-#             "nombredemois_restant": nombredemois_restant,
-#             "date_paiement_prochaine": str(prochaine_date) if prochaine_date else None
-#         }
-
-#         headers = self.get_success_headers(serializer.data)
-#         return Response(data_response, status=status.HTTP_201_CREATED, headers=headers)
-
-# class PaiementCreateView(generics.CreateAPIView):
-#     queryset = Paiement.objects.all()
-#     serializer_class = PaiementSerializer
-
-#     def create(self, request, *args, **kwargs):
-#         client_id = request.data.get('client')
-#         if not client_id:
-#             return Response({"error": "Le champ 'client' est requis."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             montant_paye = Decimal(request.data.get('Paiement_montant', '0'))
-#         except:
-#             return Response({"error": "Le montant payé est invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         if montant_paye < Decimal('100000'):
-#             return Response({"error": "Le montant minimum à payer est de 100 000 Ariary."},
-#                             status=status.HTTP_400_BAD_REQUEST)
-
-#         type_paiement = request.data.get('Paiement_type', '').lower()
-#         if type_paiement not in ['comptant', 'mensuel']:
-#             return Response({"error": "Type de paiement invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         montant_choisi = None
-#         date_choisie = None
-#         prochaine_date = None
-
-#         if type_paiement == 'mensuel':
-#             dernier_paiement = Paiement.objects.filter(
-#                 AchatsID__ClientID_id=client_id,
-#                 Paiement_type='mensuel',
-#                 Paiement_montantchoisi__isnull=False,
-#                 Paiement_datechoisi__isnull=False
-#             ).order_by('-Paiement_date').first()
-
-#             if dernier_paiement:
-#                 montant_choisi = dernier_paiement.Paiement_montantchoisi
-#                 date_choisie = dernier_paiement.Paiement_datechoisi
-#                 mois_a_ajouter = int(montant_paye / montant_choisi)
-#                 prochaine_date = date_choisie + relativedelta(months=mois_a_ajouter)
-#             else:
-#                 montant_choisi_str = request.data.get('Paiement_montantchoisi')
-#                 date_choisie_str = request.data.get('Paiement_datechoisi')
-
-#                 if not montant_choisi_str or not date_choisie_str:
-#                     return Response({
-#                         "error": "Le montant choisi et la date choisie sont requis pour le premier paiement mensuel."
-#                     }, status=status.HTTP_400_BAD_REQUEST)
-
-#                 try:
-#                     montant_choisi = Decimal(montant_choisi_str)
-#                     date_choisie = datetime.strptime(date_choisie_str, "%Y-%m-%d").date()
-#                 except:
-#                     return Response({"error": "Montant ou date invalide (format attendu : YYYY-MM-DD)."},
-#                                     status=status.HTTP_400_BAD_REQUEST)
-#                 prochaine_date = date_choisie  # premier paiement → date choisie d'origine
-
-#         achats_client = Achat.objects.filter(ClientID_id=client_id)
-#         if not achats_client.exists():
-#             return Response({"error": "Aucun achat trouvé pour ce client."}, status=status.HTTP_404_NOT_FOUND)
-
-#         total_attendu = sum(achat.ProduitID.Produit_prix * achat.Achat_quantite for achat in achats_client)
-#         total_deja_paye = Paiement.objects.filter(AchatsID__ClientID_id=client_id).aggregate(
-#             total=Sum('Paiement_montant')
-#         )['total'] or Decimal('0')
-
-#         nouveau_total = total_deja_paye + montant_paye
-#         reste = max(total_attendu - nouveau_total, Decimal('0'))
-#         statut = "complet" if nouveau_total >= total_attendu else "incomplet"
-#         montant_rendu = int(nouveau_total - total_attendu) if nouveau_total > total_attendu else 0
-
-#         dernier_achat = achats_client.order_by('-Achat_date').first()
-
-#         # Construction des données à enregistrer
-#         data = request.data.copy()
-#         data['AchatsID'] = dernier_achat.id
-#         data['Paiement_montant'] = montant_paye
-
-#         if type_paiement == 'mensuel':
-#             data['Paiement_montantchoisi'] = montant_choisi
-#             data['Paiement_datechoisi'] = prochaine_date
-#         else:
-#             data.pop('Paiement_montantchoisi', None)
-#             data.pop('Paiement_datechoisi', None)
-
-#         serializer = self.get_serializer(data=data)
-#         serializer.is_valid(raise_exception=True)
-#         paiement = serializer.save()
-
-#         # SMS
-#         client = dernier_achat.ClientID
-#         numero = client.Client_telephone
-#         envoyer_sms(numero, f"Bonjour {client.Client_nom}, votre paiement de {montant_paye:.0f} Ar a été reçu. "
-#                             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar.")
-
-#         # Mail
-#         responsable = dernier_achat.ResponsableID
-#         vendeur_email = responsable.Responsable_email
-#         admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
-#         envoyer_email(
-#             sujet=f"Confirmation de paiement - {client.Client_nom}",
-#             message=(
-#                 f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
-#                 f"Statut : {statut}\nReste à payer : {reste:.0f} Ar.\n"
-#             ),
-#             destinataires=list(admins) + [vendeur_email],
-#             reply_to=vendeur_email
-#         )
-
-#         # Produits
-#         produits_achetes = [
-#             {
-#                 "nom": achat.ProduitID.Produit_nom,
-#                 "quantite": achat.Achat_quantite,
-#                 "prix_unitaire": int(achat.ProduitID.Produit_prix),
-#                 "total": int(achat.ProduitID.Produit_prix * achat.Achat_quantite)
-#             }
-#             for achat in achats_client
-#         ]
-#         prixtotalproduit = sum(p["total"] for p in produits_achetes)
-
-#         nombredemois_restant = int(reste / montant_choisi) if montant_choisi else None
-
-#         return Response({
-#             "repaiement": True if type_paiement == 'mensuel' and total_deja_paye > 0 else False,
-#             "client": client.Client_nom,
-#             "produits": produits_achetes,
-#             "prixtotalproduit": prixtotalproduit,
-#             "total_paye": int(nouveau_total),
-#             "reste_a_payer": int(reste),
-#             "montant_rendu": montant_rendu,
-#             "statut": statut,
-#             "Paiement_type": type_paiement,
-#             "Paiement_montantchoisi": int(montant_choisi) if montant_choisi else None,
-#             "nombredemois_restant": nombredemois_restant,
-#             "date_paiement_prochaine": str(prochaine_date) if prochaine_date else None
-#         }, status=status.HTTP_201_CREATED)
-
-
-# class PaiementCreateView(generics.CreateAPIView):
-#     queryset = Paiement.objects.all()
-#     serializer_class = PaiementSerializer
-
-#     def create(self, request, *args, **kwargs):
-#         client_id = request.data.get('client')
-#         if not client_id:
-#             return Response({"error": "Le champ 'client' est requis."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             montant_paye = Decimal(request.data.get('Paiement_montant', '0'))
-#         except:
-#             return Response({"error": "Le montant payé est invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         if montant_paye < Decimal('100000'):
-#             return Response({"error": "Le montant minimum à payer est de 100 000 Ariary."},
-#                             status=status.HTTP_400_BAD_REQUEST)
-
-#         type_paiement = request.data.get('Paiement_type', '').lower()
-#         if type_paiement not in ['comptant', 'mensuel']:
-#             return Response({"error": "Type de paiement invalide."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         montant_choisi = None
-#         date_choisie = None
-#         prochaine_date = None
-
-#         if type_paiement == 'mensuel':
-#             dernier_paiement = Paiement.objects.filter(
-#                 AchatsID__ClientID_id=client_id,
-#                 Paiement_type='mensuel',
-#                 Paiement_montantchoisi__isnull=False,
-#                 Paiement_datechoisi__isnull=False
-#             ).order_by('-Paiement_date').first()
-
-#             if dernier_paiement:
-#                 montant_choisi = dernier_paiement.Paiement_montantchoisi
-#                 date_choisie = dernier_paiement.Paiement_datechoisi
-#                 mois_a_ajouter = int(montant_paye / montant_choisi)
-#                 prochaine_date = date_choisie + relativedelta(months=mois_a_ajouter)
-#             else:
-#                 montant_choisi_str = request.data.get('Paiement_montantchoisi')
-#                 date_choisie_str = request.data.get('Paiement_datechoisi')
-
-#                 if not montant_choisi_str or not date_choisie_str:
-#                     return Response({
-#                         "error": "Le montant choisi et la date choisie sont requis pour le premier paiement mensuel."
-#                     }, status=status.HTTP_400_BAD_REQUEST)
-
-#                 try:
-#                     montant_choisi = Decimal(montant_choisi_str)
-#                     date_choisie = datetime.strptime(date_choisie_str, "%Y-%m-%d").date()
-#                 except:
-#                     return Response({"error": "Montant ou date invalide (format attendu : YYYY-MM-DD)."},
-#                                     status=status.HTTP_400_BAD_REQUEST)
-#                 prochaine_date = date_choisie  # premier paiement → date choisie d'origine
-
-#         achats_client = Achat.objects.filter(ClientID_id=client_id)
-#         if not achats_client.exists():
-#             return Response({"error": "Aucun achat trouvé pour ce client."}, status=status.HTTP_404_NOT_FOUND)
-
-#         total_attendu = sum(achat.ProduitID.Produit_prix * achat.Achat_quantite for achat in achats_client)
-#         total_deja_paye = Paiement.objects.filter(AchatsID__ClientID_id=client_id).aggregate(
-#             total=Sum('Paiement_montant')
-#         )['total'] or Decimal('0')
-
-#         nouveau_total = total_deja_paye + montant_paye
-#         reste = max(total_attendu - nouveau_total, Decimal('0'))
-#         statut = "complet" if nouveau_total >= total_attendu else "incomplet"
-#         montant_rendu = int(nouveau_total - total_attendu) if nouveau_total > total_attendu else 0
-
-#         dernier_achat = achats_client.order_by('-Achat_date').first()
-#  # Création de la facture liée à cet achat (si pas déjà créée)
-#         facture_existante = Facture.objects.filter(achat=dernier_achat).exists()
-#         if not facture_existante:
-#             facture = Facture.objects.create(achat=dernier_achat)
-#         else:
-#             facture = Facture.objects.get(achat=dernier_achat)
-#         # Construction des données à enregistrer
-#         data = request.data.copy()
-#         data['AchatsID'] = dernier_achat.id
-#         data['Paiement_montant'] = montant_paye
-
-#         if type_paiement == 'mensuel':
-#             data['Paiement_montantchoisi'] = montant_choisi
-#             data['Paiement_datechoisi'] = prochaine_date
-#         else:
-#             data.pop('Paiement_montantchoisi', None)
-#             data.pop('Paiement_datechoisi', None)
-
-#         serializer = self.get_serializer(data=data)
-#         serializer.is_valid(raise_exception=True)
-#         paiement = serializer.save()
-
-#         # SMS
-#         client = dernier_achat.ClientID
-#         numero = client.Client_telephone
-#         envoyer_sms(numero, f"Bonjour {client.Client_nom}, votre paiement de {montant_paye:.0f} Ar a été reçu. "
-#                             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar.")
-
-#         # Mail
-#         responsable = dernier_achat.ResponsableID
-#         vendeur_email = responsable.Responsable_email
-#         admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
-#         envoyer_email(
-#             sujet=f"Confirmation de paiement - {client.Client_nom}",
-#             message=(
-#                 f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
-#                 f"Statut : {statut}\nReste à payer : {reste:.0f} Ar.\n"
-#             ),
-#             destinataires=list(admins) + [vendeur_email],
-#             reply_to=vendeur_email
-#         )
-
-#         # Produits
-#         produits_achetes = [
-#             {
-#                 "nom": achat.ProduitID.Produit_nom,
-#                 "quantite": achat.Achat_quantite,
-#                 "prix_unitaire": int(achat.ProduitID.Produit_prix),
-#                 "total": int(achat.ProduitID.Produit_prix * achat.Achat_quantite)
-#             }
-#             for achat in achats_client
-#         ]
-#         prixtotalproduit = sum(p["total"] for p in produits_achetes)
-
-#         nombredemois_restant = int(reste / montant_choisi) if montant_choisi else None
-
-#         return Response({
-#             "repaiement": True if type_paiement == 'mensuel' and total_deja_paye > 0 else False,
-#             "client": client.Client_nom,
-#             "produits": produits_achetes,
-#             "prixtotalproduit": prixtotalproduit,
-#             "total_paye": int(nouveau_total),
-#             "reste_a_payer": int(reste),
-#             "montant_rendu": montant_rendu,
-#             "statut": statut,
-#             "Paiement_type": type_paiement,
-#             "Paiement_montantchoisi": int(montant_choisi) if montant_choisi else None,
-#             "nombredemois_restant": nombredemois_restant,
-#             "date_paiement_prochaine": str(prochaine_date) if prochaine_date else None,
-#             "numero_facture": facture.numero_facture,
-#             "facture_id": facture.id,
-#         }, status=status.HTTP_201_CREATED)
-from django.utils.timezone import now
 
 # class PaiementCreateView(generics.CreateAPIView):
 #     queryset = Paiement.objects.all()
@@ -968,10 +258,17 @@ class PaiementCreateView(generics.CreateAPIView):
         dernier_achat = achats_client.order_by('-Achat_date').first()
 
         # Génération du numéro de facture
-        today = now().date()
-        prefix = today.strftime("FACT-%Y%m%d-")
-        compteur = Facture.objects.filter(date_creation__date=today).count() + 1
-        numero_facture = f"{prefix}{compteur:04d}"
+        # On cherche le dernier numéro de facture créé (le max des chiffres après "FACT-")
+        last_facture = Facture.objects.order_by('-id').first()
+        last_num = 0
+        if last_facture and last_facture.numero_facture:
+            import re
+            match = re.search(r'FACT-(\d+)', last_facture.numero_facture)
+            if match:
+                last_num = int(match.group(1))
+        new_num = last_num + 1
+        numero_facture = f"FACT-{new_num:04d}"
+
         facture = Facture.objects.create(achat=dernier_achat, numero_facture=numero_facture)
 
         # Création du paiement
@@ -997,19 +294,19 @@ class PaiementCreateView(generics.CreateAPIView):
                             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar.")
 
         # Envoi email aux admins et vendeur
-        responsable = dernier_achat.ResponsableID
-        vendeur_email = responsable.Responsable_email
-        admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
-        envoyer_email(
-            sujet=f"Confirmation de paiement - {client.Client_nom}",
-            message=(
-                f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
-                f"Statut : {statut}\nReste à payer : {reste:.0f} Ar.\n"
-                f"Revenu supplémentaire : {revenu:.0f} Ar.\n"
-            ),
-            destinataires=list(admins) + [vendeur_email],
-            reply_to=vendeur_email
-        )
+        # responsable = dernier_achat.ResponsableID
+        # vendeur_email = responsable.Responsable_email
+        # admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
+        # envoyer_email(
+        #     sujet=f"Confirmation de paiement - {client.Client_nom}",
+        #     message=(
+        #         f"Le client {client.Client_nom} ({numero}) a effectué un paiement de {montant_paye:.0f} Ar.\n"
+        #         f"Statut : {statut}\nReste à payer : {reste:.0f} Ar.\n"
+        #         f"Revenu supplémentaire : {revenu:.0f} Ar.\n"
+        #     ),
+        #     destinataires=list(admins) + [vendeur_email],
+        #     reply_to=vendeur_email
+        # )
 
         produits_achetes = [
             {
@@ -1334,59 +631,8 @@ class RepaiementCreateView(generics.CreateAPIView):
 
 class PaiementListView(generics.ListAPIView):
     queryset = Paiement.objects.all().order_by('-Paiement_date')
-    serializer_class = PaiementSerializer
+    serializer_class = PaiementSerializer 
 
-# class ListeResteAPayerParClient(APIView):
-#     def get(self, request):
-#         clients_data = []
-
-#         clients = Client.objects.all()
-
-#         for client in clients:
-#             achats = Achat.objects.filter(ClientID=client)
-#             if not achats.exists():
-#                 continue  # ignorer les clients sans achat
-
-#             produits_achetes = []
-#             total_attendu = Decimal('0')
-
-#             for achat in achats:
-#                 produit = achat.ProduitID
-#                 quantite = achat.Achat_quantite
-#                 prix_unitaire = Decimal(produit.Produit_prix)
-#                 total = prix_unitaire * quantite
-#                 total_attendu += total
-
-#                 produits_achetes.append({
-#                     "nom": produit.Produit_nom,
-#                     "quantite": quantite,
-#                     "prix_unitaire": int(prix_unitaire),
-#                     "total": int(total)
-#                 })
-
-#             total_paye = Paiement.objects.filter(AchatsID__ClientID=client).aggregate(
-#                 total=Sum('Paiement_montant')
-#             )['total'] or Decimal('0')
-
-#             reste = max(total_attendu - total_paye, Decimal('0'))
-#             statut = "complet" if total_paye >= total_attendu else "incomplet"
-
-#             clients_data.append({
-#                 "id": client.id,
-#                 "client": client.Client_nom,
-#                 "produits": produits_achetes,
-#                 "prixtotalproduit": int(total_attendu),
-#                 "total_paye": int(total_paye),
-#                 "reste_a_payer": int(reste),
-#                 "statut": statut,
-#                 "date_paiement_prochaine": str(prochaine_date) if prochaine_date else None
-
-#             })
-
-#         return Response(clients_data, status=status.HTTP_200_OK)
-    
-
-from collections import defaultdict
 
 class ListeResteAPayerParClient(APIView):
     def get(self, request):
@@ -1463,81 +709,6 @@ class ListeResteAPayerParClient(APIView):
         return Response(response_data, status=status.HTTP_200_OK)
 
 
-# class ListePayerParClient(APIView):
-#     def get(self, request):
-#         # Récupérer tous les achats triés par Achat_date
-#         achats = Achat.objects.select_related('ClientID', 'ProduitID').order_by('Achat_date')
-
-#         # Regrouper achats par date (ex: "2025-07-26 22:14:51")
-#         achats_groupes = defaultdict(lambda: defaultdict(list))
-#         # Structure : achats_groupes[date_str][client_id] = list d'achats
-
-#         for achat in achats:
-#             date_str = achat.Achat_date.strftime("%Y-%m-%d %H:%M:%S")
-#             client = achat.ClientID
-#             produit = achat.ProduitID
-#             quantite = achat.Achat_quantite
-#             prix_unitaire = Decimal(produit.Produit_prix)
-#             total = prix_unitaire * quantite
-
-#             achats_groupes[date_str][client.id].append({
-#                 "nom": produit.Produit_nom,
-#                 "quantite": quantite,
-#                 "prix_unitaire": int(prix_unitaire),
-#                 "total": int(total),
-#             })
-
-#         # Construire la liste finale à renvoyer
-#         result = []
-
-#         for date_str, clients_dict in achats_groupes.items():
-#             clients_list = []
-
-#             for client_id, produits in clients_dict.items():
-#                 client_obj = get_object_or_404(Client, id=client_id)
-
-#                 # Calcul total produits pour ce client + date
-#                 prixtotalproduit = sum(p['total'] for p in produits)
-
-#                 # Récupérer tous les paiements liés à ce client sur cette date (à adapter selon ta logique)
-#                 paiements = Paiement.objects.filter(
-#                     AchatsID__ClientID=client_obj,
-#                     Paiement_date__date=achat.Achat_date.date()
-#                 )
-
-#                 total_paye = paiements.aggregate(total=Sum('Paiement_montant'))['total'] or Decimal('0')
-#                 reste_a_payer = max(prixtotalproduit - total_paye, Decimal('0'))
-#                 statut = "complet" if total_paye >= prixtotalproduit else "incomplet"
-#                 progress = int((total_paye / prixtotalproduit) * 100) if prixtotalproduit > 0 else 0
-
-#                 clients_list.append({
-#                     "id": client_obj.id,
-#                     "client": client_obj.Client_nom,
-#                     "achats_par_date": [
-#                         {
-#                             "date": date_str,
-#                             "produits": produits,
-#                         }
-#                     ],
-#                     "prixtotalproduit": int(prixtotalproduit),
-#                     "total_paye": int(total_paye),
-#                     "reste_a_payer": int(reste_a_payer),
-#                     "statut": statut,
-#                     "progress": progress,
-#                     # Ajouter champs date paiement prochaine et nb mois restant si tu as la logique ici
-#                     "date_paiement_prochaine": None,
-#                     "nombredemois_restant": None,
-#                 })
-
-#             result.append({
-#                 "date": date_str,
-#                 "clients": clients_list
-#             })
-
-#         # Trier par date décroissante si besoin
-#         result = sorted(result, key=lambda x: x['date'], reverse=True)
-
-#         return Response(result, status=status.HTTP_200_OK)
 
 class VerifierPaiementListView(generics.ListAPIView):
     def get(self, request, *args, **kwargs):
@@ -1559,15 +730,17 @@ class VerifierPaiementListView(generics.ListAPIView):
 
                 message = (
                     f"⚠️ Le client {client.Client_nom} "
-                    f"doit payer le deuxième paiement le {paiement.Paiement_datechoisi}."
+                    f"doit payer le deuxième paiement le {paiement.Paiement_datechoisi} "
+                    f"(achat effectué le {achat.Achat_date})."
                 )
 
                 notifications.append({
                     "message": message,
-                    "client_id": client.id  # ou "achat_id": achat.id si tu préfères
+                    "client_id": client.id,
+                    "achat_date": achat.Achat_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    "date_paiement": str(paiement.Paiement_datechoisi),
                 })
 
-                # # Envoi email au responsable
                 # if responsable and responsable.Responsable_email:
                 #     envoyer_email(
                 #         sujet="Paiement proche à effectuer",
@@ -1575,12 +748,7 @@ class VerifierPaiementListView(generics.ListAPIView):
                 #         destinataires=responsable.Responsable_email
                 #     )
 
-                # # Envoi SMS au client
-                # if client and client.Client_telephone:
-                #     envoyer_sms(client.Client_telephone, message)
-
-        return Response({"messages": notifications}, status=status.HTTP_200_OK)   
-
+        return Response({"messages": notifications}, status=status.HTTP_200_OK)
 
 
 from django.shortcuts import get_object_or_404
@@ -1839,10 +1007,10 @@ class PaiementUpdateView(generics.UpdateAPIView):
         envoyer_sms(numero, f"Bonjour {client.Client_nom}, votre paiement de {montant_paye:.0f} Ar a été mis à jour. "
                             f"Statut: {statut}. Reste à payer: {reste:.0f} Ar.")
 
-        # Email aux responsables
-        responsable = dernier_achat.ResponsableID
-        vendeur_email = responsable.Responsable_email
-        admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
+        # # Email aux responsables
+        # responsable = dernier_achat.ResponsableID
+        # vendeur_email = responsable.Responsable_email
+        # admins = Responsable.objects.filter(Responsable_role='admin').values_list('Responsable_email', flat=True)
 
         # Optionnel : Décommente pour activer l'email
         # envoyer_email(

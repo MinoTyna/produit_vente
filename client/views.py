@@ -57,18 +57,48 @@ class ClientDeleteAPIView(APIView):
         client.delete()
         return Response({"message": "Client supprimé avec succès."}, status=status.HTTP_200_OK)
 
-class ClientUpdateAPIView(APIView):
-    def put(self, request, client_id):
-        try:
-            client = Client.objects.get(id=client_id)
-        except Client.DoesNotExist:
-            return Response({"error": "client introuvable."}, status=status.HTTP_404_NOT_FOUND)
+# class ClientUpdateAPIView(APIView):
+#     def put(self, request, client_id):
+#         try:
+#             client = Client.objects.get(id=client_id)
+#         except Client.DoesNotExist:
+#             return Response({"error": "client introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ClientSerializer(client, data=request.data, partial=True)  # partial=True pour update partiel
-        if serializer.is_valid():
-            serializer.save()
-            return Response({"message": "Client mis à jour avec succès.", "client": serializer.data}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#         serializer = ClientSerializer(client, data=request.data, partial=True)  # partial=True pour update partiel
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response({"message": "Client mis à jour avec succès.", "client": serializer.data}, status=status.HTTP_200_OK)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ClientUpdateAPIView(APIView):
+    def put(self, request, pk):
+        try:
+            client = Client.objects.get(pk=pk)
+
+            client.Client_nom = request.data.get("Client_nom")
+            client.Client_prenom = request.data.get("Client_prenom")
+            client.Client_cin = request.data.get("Client_cin")
+            client.Client_telephone = request.data.get("Client_telephone")
+            client.Client_adresse = request.data.get("Client_adresse")
+
+            # 🔥 Ajout ici (convertir en float si nécessaire)
+            latitude = request.data.get("latitude")
+            longitude = request.data.get("longitude")
+            client.latitude = float(latitude) if latitude else None
+            client.longitude = float(longitude) if longitude else None
+
+            if "Client_photo" in request.FILES:
+                client.Client_photo = request.FILES["Client_photo"]
+
+            client.save()
+            return Response({"message": "Client mis à jour"}, status=status.HTTP_200_OK)
+
+        except Client.DoesNotExist:
+            return Response({"error": "Client non trouvé"}, status=status.HTTP_404_NOT_FOUND)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class GeocodeAPIView(APIView):
     def get(self, request):

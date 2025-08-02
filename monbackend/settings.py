@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework_simplejwt',
     'rest_framework',
     'corsheaders',
     'responsable',
@@ -82,6 +83,11 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'monbackend.wsgi.application'
 DB_LIVE = os.getenv("DB_LIVE")
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
 
 
 # Database
@@ -100,17 +106,28 @@ DB_LIVE = os.getenv("DB_LIVE")
 #     }
 
 # else :
+
+# DATABASES = {
+#         'default': {
+#             'ENGINE': 'django.db.backends.postgresql',
+#             'NAME': os.getenv("DB_NAME"),
+#             'USER': os.getenv("DB_USER"),
+#             'PASSWORD': os.getenv("DB_PASSWORD"),
+#             'HOST': os.getenv("DB_HOST"), 
+#             'PORT': os.getenv("DB_PORT"),        
+#         }
+#     }
+
 DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.getenv("DB_NAME"),
-            'USER': os.getenv("DB_USER"),
-            'PASSWORD': os.getenv("DB_PASSWORD"),
-            'HOST': os.getenv("DB_HOST"), 
-            'PORT': os.getenv("DB_PORT"),        
+            'NAME': 'test',
+            'USER': 'postgres',
+            'PASSWORD': '1234',
+            'HOST': 'localhost',
+            'PORT': '5432',
         }
     }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -151,8 +168,8 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'christinerasoanambinina@gmail.com'          # Remplace par ton email Gmail
-EMAIL_HOST_PASSWORD = 'ycox hlzy hlit kldm'                # Mot de passe d'application Gmail, pas ton mot de passe normal
+EMAIL_HOST_USER = 'tinyroane@gmail.com'          # Remplace par ton email Gmail
+EMAIL_HOST_PASSWORD = 'gsmc smzx rhhe qdyk'                # Mot de passe d'application Gmail, pas ton mot de passe normal
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 STATIC_URL = 'static/'
