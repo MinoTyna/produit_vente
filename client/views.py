@@ -76,17 +76,22 @@ class ClientUpdateAPIView(APIView):
         try:
             client = Client.objects.get(pk=pk)
 
-            client.Client_nom = request.data.get("Client_nom")
-            client.Client_prenom = request.data.get("Client_prenom")
-            client.Client_cin = request.data.get("Client_cin")
-            client.Client_telephone = request.data.get("Client_telephone")
-            client.Client_adresse = request.data.get("Client_adresse")
-
-            # 🔥 Ajout ici (convertir en float si nécessaire)
+            nom = request.data.get("Client_nom")
+            prenom = request.data.get("Client_prenom")
+            cin = request.data.get("Client_cin")
+            telephone = request.data.get("Client_telephone")
+            adresse = request.data.get("Client_adresse")
             latitude = request.data.get("latitude")
             longitude = request.data.get("longitude")
-            client.latitude = float(latitude) if latitude else None
-            client.longitude = float(longitude) if longitude else None
+
+            if nom: client.Client_nom = nom
+            if prenom: client.Client_prenom = prenom
+            if cin: client.Client_cin = cin
+            if telephone: client.Client_telephone = telephone
+            if adresse: client.Client_adresse = adresse
+
+            if latitude: client.latitude = float(latitude)
+            if longitude: client.longitude = float(longitude)
 
             if "Client_photo" in request.FILES:
                 client.Client_photo = request.FILES["Client_photo"]
