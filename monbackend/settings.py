@@ -107,16 +107,16 @@ REST_FRAMEWORK = {
 
 # else :
 
-DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.getenv("DB_NAME"),
-            'USER': os.getenv("DB_USER"),
-            'PASSWORD': os.getenv("DB_PASSWORD"),
-            'HOST': os.getenv("DB_HOST"), 
-            'PORT': os.getenv("DB_PORT"),        
-        }
-    }
+# DATABASES = {
+#         'default': {
+#             'ENGINE': 'django.db.backends.postgresql',
+#             'NAME': os.getenv("DB_NAME"),
+#             'USER': os.getenv("DB_USER"),
+#             'PASSWORD': os.getenv("DB_PASSWORD"),
+#             'HOST': os.getenv("DB_HOST"), 
+#             'PORT': os.getenv("DB_PORT"),        
+#         }
+#     }
 
 # DATABASES = {
 #         'default': {
@@ -128,6 +128,18 @@ DATABASES = {
 #             'PORT': '5432',
 #         }
 #     }
+
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME', 'aufsarl1_vente'),
+        'USER': os.getenv('DB_USER', 'aufsarl1_cpses_aumfwfliib'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'If1ISBxFvLpu6neIP22iRfbwqMS8tG2J'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
